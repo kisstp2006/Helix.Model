@@ -1,4 +1,8 @@
+#include <Support/SampleFbx.h>
 #include <Support/SampleModels.h>
+
+#include <Helix/Model/Fbx/Fbx.h>
+#include <Helix/Model/Scene/Convert.h>
 
 #include <Helix/Model/Obj/Obj.h>
 #include <Helix/Testing/Fuzz.h>
@@ -119,4 +123,44 @@ HX_FUZZ(Obj)
     String error;
     round.Step("read");
     return ReadObj(Span<const u8>(obj), s, error, options) ? Check(s) : 0;
+}
+
+
+namespace
+{
+    const Array<u8>& Fbx(int which)
+    {
+        static const Array<u8> files[3] = {SampleFbx().Binary(7400), SampleFbx().Binary(7500, true), [] {
+                                               String text = SampleFbx().Ascii();
+                                               Array<u8> b;
+                                               b.Append(reinterpret_cast<const u8*>(text.Data()), text.Size());
+                                               return b;
+                                           }()};
+        return files[which];
+    }
+
+    u64 ReadFbxRound(helix::testing::FuzzRound& round, const Array<u8>& seed)
+    {
+        Array<u8> bytes = Mutated(round, seed.Data(), seed.Size());
+        Scene s;
+        String error;
+        round.Step("read");
+        if (!ReadFbx(Span<const u8>(bytes), s, error))
+            return 0;
+        u64 n = Check(s);
+        round.Step("convert");
+        ConvertScene(s);
+        return n + Check(s);
+    }
+}
+
+// Binary FBX, raw and zlib arrays, records of 32 and 64 bit offsets.
+HX_FUZZ(FbxBinary)
+{
+    return ReadFbxRound(round, Fbx(int(round.Below(2))));
+}
+
+HX_FUZZ(FbxAscii)
+{
+    return ReadFbxRound(round, Fbx(2));
 }

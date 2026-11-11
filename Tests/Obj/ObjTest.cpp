@@ -103,7 +103,7 @@ HX_TEST(Obj, Geometry)
 {
     Scene s;
     HX_REQUIRE(Read(kCube, s, Loader()));
-    HX_CHECK(s.unitScale == 0 && s.upAxis == 1);
+    HX_CHECK(s.unitScale == 0 && s.axes.up == 1);
     // Cube, Lines, Colored; the empty object is left out.
     HX_REQUIRE(s.meshes.Size() == 3u && s.nodes.Size() == 3u && s.roots.Size() == 3u);
     HX_CHECK(s.meshes[0].name == StringView("Cube") && s.meshes[1].name == StringView("Lines") && s.meshes[2].name == StringView("Colored"));

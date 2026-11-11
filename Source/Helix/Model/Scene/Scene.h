@@ -71,6 +71,10 @@ namespace helix::model
     struct MorphTarget
     {
         String name;
+        // The blend shape channel the target belongs to (its index among the mesh's channels) and the channel weight
+        // (0 to 100) at which it is reached fully; channels with in-between shapes have several targets.
+        u32 channel = kNone;
+        float fullWeight = 100;
         // Deltas of position, normal and tangent (into Scene::streams).
         Range streams;
     };
@@ -280,19 +284,22 @@ namespace helix::model
         float innerConeAngle = 0, outerConeAngle = 0.7853982f;
     };
 
+    // The axes of a source as FBX names them: which axis (0 x, 1 y, 2 z) is up, which faces the viewer (front) and
+    // which points right (coord), each with its sign. glTF and OBJ: y up, z front, x right, right handed.
+    struct AxisSystem
+    {
+        u8 up = 1, front = 2, coord = 0;
+        i8 upSign = 1, frontSign = 1, coordSign = 1;
+    };
+
     struct Scene
     {
-        // Where the scene came from, for the importer's conversion.
-        enum class Handedness : u8
-        {
-            Right,
-            Left,
-        };
-        Handedness handedness = Handedness::Right;
-        // 1 = y up, 2 = z up.
-        u8 upAxis = 1;
+        // Where the scene came from, for the conversion to the engine's frame.
+        AxisSystem axes;
         // Meters per unit; 0 when the format does not say.
         float unitScale = 1;
+        // Frames per second of the source's animation, 0 when it has none.
+        float frameRate = 0;
 
         Array<Node> nodes;
         Array<u32> roots;

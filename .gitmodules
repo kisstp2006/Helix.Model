@@ -10,3 +10,15 @@
 [submodule "External/Helix.Serialization"]
 	path = External/Helix.Serialization
 	url = https://github.com/kisstp2006/Helix.Serialization
+[submodule "External/Helix.Platform"]
+	path = External/Helix.Platform
+	url = https://github.com/kisstp2006/Helix.Platform
+[submodule "External/Helix.Profiler"]
+	path = External/Helix.Profiler
+	url = https://github.com/kisstp2006/Helix.Profiler
+[submodule "External/Helix.Jobs"]
+	path = External/Helix.Jobs
+	url = https://github.com/kisstp2006/Helix.Jobs
+[submodule "External/Helix.Image"]
+	path = External/Helix.Image
+	url = https://github.com/kisstp2006/Helix.Image

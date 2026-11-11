@@ -244,7 +244,7 @@ HX_TEST(Gltf, GlbAndExternalBuffers)
     Scene s;
     HX_REQUIRE(Read(Span<const u8>(glb), s));
     // Without scenes every node without a parent is a root.
-    HX_CHECK(s.primitives.Size() == 1u && s.Data(s.streams[0])[3] == 1 && s.roots.Size() == 2u && s.unitScale == 1 && s.upAxis == 1);
+    HX_CHECK(s.primitives.Size() == 1u && s.Data(s.streams[0])[3] == 1 && s.roots.Size() == 2u && s.unitScale == 1 && s.axes.up == 1 && s.axes.front == 2);
 
     struct Context
     {

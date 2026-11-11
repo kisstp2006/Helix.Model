@@ -412,7 +412,7 @@ namespace helix::model
 
             bool Run(StringView text)
             {
-                s_.upAxis = 1;
+                s_.axes = AxisSystem();
                 s_.unitScale = 0;
                 Lines lines(text);
                 StringView line;

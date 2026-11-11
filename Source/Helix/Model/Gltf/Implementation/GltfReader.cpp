@@ -126,8 +126,7 @@ namespace helix::model
                 if (!j_.IsObject(root_))
                     return Fail("the document is not a JSON object");
                 bin_ = bin;
-                s_.handedness = Scene::Handedness::Right;
-                s_.upAxis = 1;
+                s_.axes = AxisSystem();
                 s_.unitScale = 1;
                 return Asset() && Extensions() && Buffers() && BufferViews() && Images() && Samplers() && Textures() && Materials() && Meshes() &&
                        Cameras() && Lights() && Skins() && Nodes() && Scenes() && Animations();
