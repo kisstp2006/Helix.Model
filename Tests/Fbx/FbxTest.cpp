@@ -191,6 +191,41 @@ HX_TEST(Fbx, SceneFromEveryEncoding)
     CheckSample(s);
 }
 
+// Models that use one geometry with the same materials and no geometric transform share one mesh and its skin, as
+// instances (found with Blender's FBX exports in the corpus); a model with a geometric transform keeps its own.
+HX_TEST(Fbx, SharedGeometryIsOneMesh)
+{
+    FbxFile f = SampleFbx();
+    for (FbxNode& top : f.top)
+    {
+        if (top.name == StringView("Objects"))
+            for (i64 id : {210, 211})
+            {
+                FbxNode m = Object("Model", id, "Model", id == 210 ? "CopyA" : "CopyB", "Mesh");
+                m.Add(FbxNode("Properties70"));
+                top.Add(Move(m));
+            }
+        if (top.name == StringView("Connections"))
+            for (i64 id : {210, 211})
+                top.Add(Connect(id, 0)).Add(Connect(100, id)).Add(Connect(300, id)).Add(Connect(301, id));
+    }
+    Scene s;
+    HX_REQUIRE(Read(f.Binary(7400), s));
+    u32 cube = kNone, a = kNone, b = kNone;
+    for (u32 i = 0; i < s.nodes.Size(); i++)
+    {
+        StringView name = s.nodes[i].name;
+        cube = name == StringView("Cube") ? i : cube;
+        a = name == StringView("CopyA") ? i : a;
+        b = name == StringView("CopyB") ? i : b;
+    }
+    HX_REQUIRE(cube != kNone && a != kNone && b != kNone);
+    HX_CHECK(s.nodes[a].mesh != kNone && s.nodes[a].mesh == s.nodes[b].mesh);
+    HX_CHECK(s.nodes[cube].mesh != s.nodes[a].mesh);
+    HX_CHECK(s.nodes[a].skin != kNone && s.nodes[a].skin == s.nodes[b].skin);
+    HX_CHECK_EQ(s.meshes.Size(), usize(2));
+}
+
 HX_TEST(Fbx, ConversionToTheEngineFrame)
 {
     Scene s;

@@ -128,6 +128,7 @@ namespace helix::model
                 bin_ = bin;
                 s_.axes = AxisSystem();
                 s_.unitScale = 1;
+                s_.uvOriginTop = true;
                 return Asset() && Extensions() && Buffers() && BufferViews() && Images() && Samplers() && Textures() && Materials() && Meshes() &&
                        Cameras() && Lights() && Skins() && Nodes() && Scenes() && Animations();
             }
@@ -286,6 +287,18 @@ namespace helix::model
                         known = known || k == name;
                     if (!known)
                         return Fail(Format("extensionsRequired: {} is not supported", name));
+                }
+                // Extensions the file uses but does not require are left out with a warning (EXT_mesh_gpu_instancing:
+                // the instances are not there).
+                u32 used = Array(root_, "extensionsUsed");
+                for (u32 i = 0; i < Count(used); i++)
+                {
+                    StringView name = Text(j_.Item(used, i));
+                    bool known = false;
+                    for (StringView k : kSupported)
+                        known = known || k == name;
+                    if (!known)
+                        s_.warnings.Push(Format("extensionsUsed: {} is not read", name));
                 }
                 return true;
             }

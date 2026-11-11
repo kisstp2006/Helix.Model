@@ -1,9 +1,12 @@
 #include "Common.h"
 
+#include <Helix/Core/Containers/HashMap.h>
+
 // Tangent spaces as Morten Mikkelsen describes them in "Simulation of Wrinkled Surfaces Revisited" (MikkTSpace): the
-// per triangle derivatives of position along u and v, normalized and signed by the triangle's UV orientation, projected
-// into the plane of each corner's normal and summed with the corner's angle over the corners that share the vertex
-// (position, normal and UV) and the orientation.
+// per triangle derivatives of position along u, normalized and signed by the triangle's UV orientation, projected into
+// the plane of each corner's normal and summed with the corner's angle over the corners that share the vertex
+// (position, normal and UV) and the orientation and are joined around it by edges; corners of triangles without UV
+// area take the tangent space of another corner of their vertex.
 namespace helix::model
 {
     using namespace detail;
@@ -52,11 +55,11 @@ namespace helix::model
         u32 identities = GroupEqual(vertex.Data(), vertexCount, 8, identity);
 
         usize triangles = indices.Size() / 3;
-        // Per group (identity * 2 + orientation): the summed tangent.
-        Array<Vec3> sums;
-        sums.Resize(usize(identities) * 2);
+        // Per triangle: its UV orientation (2: no UV area) and its unit derivative along u, signed by the orientation.
         Array<u8> orientation;
         orientation.Resize(triangles);
+        Array<Vec3> derivative;
+        derivative.Resize(triangles);
         for (usize t = 0; t < triangles; t++)
         {
             const float* v[3];
@@ -66,41 +69,81 @@ namespace helix::model
             float s1 = v[1][6] - v[0][6], t1 = v[1][7] - v[0][7];
             float s2 = v[2][6] - v[0][6], t2 = v[2][7] - v[0][7];
             float area = s1 * t2 - t1 * s2;
-            bool preserving = area > 0;
-            orientation[t] = preserving ? 1 : 0;
-            // Without UV area the triangle gives no direction; its corners take their neighbors'.
-            if (!(area != 0))
-            {
-                orientation[t] = 2;
+            orientation[t] = area > 0 ? 1 : area < 0 ? 0 : 2;
+            derivative[t] = Normalize(d1 * t2 - d2 * t1) * (area > 0 ? 1.0f : -1.0f);
+        }
+
+        // Corners share a tangent space when they are one vertex, of one orientation, and joined around that vertex by
+        // edges of triangles of that orientation (MikkTSpace's groups): union find over the corners, joined through
+        // the edges (vertex, neighbor) they have.
+        usize corners = indices.Size();
+        Array<u32> parent;
+        parent.Resize(corners);
+        for (usize c = 0; c < corners; c++)
+            parent[c] = u32(c);
+        auto find = [&](u32 c) {
+            while (parent[c] != c)
+                c = parent[c] = parent[parent[c]];
+            return c;
+        };
+        HashMap<u64, u32> around;
+        around.Reserve(corners * 2);
+        for (usize c = 0; c < corners; c++)
+        {
+            usize t = c / 3, k = c % 3;
+            if (orientation[t] == 2)
                 continue;
-            }
-            Vec3 os = d1 * t2 - d2 * t1;
-            os = Normalize(os) * (preserving ? 1.0f : -1.0f);
-            for (u32 k = 0; k < 3; k++)
+            u32 v = identity[indices[c]];
+            for (usize n : {t * 3 + (k + 1) % 3, t * 3 + (k + 2) % 3})
             {
-                Vec3 n = Load(v[k] + 3);
-                Vec3 e1 = Project(Load(v[(k + 1) % 3]) - Load(v[k]), n), e2 = Project(Load(v[(k + 2) % 3]) - Load(v[k]), n);
-                float angle = FastAcos(Dot(e1, e2));
-                u32 g = identity[indices[t * 3 + k]] * 2 + orientation[t];
-                sums[g] = sums[g] + Project(os, n) * angle;
+                u64 key = (u64(v) << 33) | (u64(identity[indices[n]]) << 1) | orientation[t];
+                if (u32* other = around.Find(key))
+                {
+                    u32 a = find(u32(c)), b = find(*other);
+                    if (a != b)
+                        parent[a] = b;
+                }
+                else
+                    around.Set(key, u32(c));
             }
         }
 
-        Array<float> tangents;
-        tangents.Resize(indices.Size() * 4);
-        for (usize c = 0; c < indices.Size(); c++)
+        // The sum of each group: derivatives projected into each corner's normal plane, weighted by the corner's angle.
+        Array<Vec3> sums;
+        sums.Resize(corners);
+        // A corner of each vertex in a triangle with UV area, for the corners of triangles without it.
+        Array<u32> anyCorner;
+        anyCorner.Resize(identities, kNone);
+        for (usize c = 0; c < corners; c++)
         {
-            u32 id = identity[indices[c]];
+            usize t = c / 3, k = c % 3;
+            if (orientation[t] == 2)
+                continue;
+            const float* v = vertex.Data() + usize(indices[c]) * 8;
+            const float* a = vertex.Data() + usize(indices[t * 3 + (k + 1) % 3]) * 8;
+            const float* b = vertex.Data() + usize(indices[t * 3 + (k + 2) % 3]) * 8;
+            Vec3 n = Load(v + 3);
+            Vec3 e1 = Project(Load(a) - Load(v), n), e2 = Project(Load(b) - Load(v), n);
+            float angle = FastAcos(Dot(e1, e2));
+            u32 g = find(u32(c));
+            sums[g] = sums[g] + Project(derivative[t], n) * angle;
+            u32& any = anyCorner[identity[indices[c]]];
+            any = any == kNone ? u32(c) : any;
+        }
+
+        Array<float> tangents;
+        tangents.Resize(corners * 4);
+        for (usize c = 0; c < corners; c++)
+        {
             const float* v = vertex.Data() + usize(indices[c]) * 8;
             Vec3 n = Load(v + 3);
-            u8 o = orientation[c / 3];
-            if (o == 2)
-                o = Dot(sums[id * 2 + 1], sums[id * 2 + 1]) > 0 || Dot(sums[id * 2], sums[id * 2]) == 0 ? 1 : 0;
-            Vec3 tangent = Project(sums[id * 2 + o], n);
+            u32 from = orientation[c / 3] == 2 ? anyCorner[identity[indices[c]]] : u32(c);
+            Vec3 tangent = from != kNone ? Project(sums[find(from)], n) : Vec3{};
+            bool preserving = from == kNone || orientation[from / 3] == 1;
             if (Dot(tangent, tangent) == 0)
                 tangent = Perpendicular(n);
             float* out = tangents.Data() + c * 4;
-            out[0] = tangent.x, out[1] = tangent.y, out[2] = tangent.z, out[3] = o ? 1.0f : -1.0f;
+            out[0] = tangent.x, out[1] = tangent.y, out[2] = tangent.z, out[3] = preserving ? 1.0f : -1.0f;
         }
         SplitByCorners(s, primitive, indices, tangents.Data(), 4, Semantic::Tangent, 0);
         return true;

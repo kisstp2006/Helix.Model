@@ -1,6 +1,7 @@
 #include <Support/GltfWriter.h>
 
 #include <Helix/Model/Gltf/Gltf.h>
+#include <Helix/Model/Scene/Convert.h>
 #include <Helix/Testing/Test.h>
 
 #include <cmath>
@@ -265,6 +266,68 @@ HX_TEST(Gltf, GlbAndExternalBuffers)
     HX_CHECK(context.asked == StringView("data/mesh bin.bin") && s.Data(s.streams[0])[7] == 1);
     String error;
     HX_CHECK(!ReadGltf(AsBytes(w.External(body, "missing.bin")), s, error, options) && error == StringView("buffers[0].uri: 'missing.bin' could not be loaded"));
+}
+
+// glTF's v = 0 is the top of the image: the conversion turns texture coordinates (and morph deltas of them) to v = 0 at
+// the bottom, and every texture transform so that it maps the same texel (found comparing tangents with Blender's in
+// the corpus); tangents keep their handedness, which already counts v toward the image's top.
+HX_TEST(Gltf, TextureCoordinatesToTheEngineOrigin)
+{
+    GltfWriter w;
+    u32 pos = w.Data<float>({0, 0, 0, 1, 0, 0, 0, 1, 0}, 5126, "VEC3", 3);
+    u32 uv = w.Data<float>({0, 0, 1, 0.25f, 0.5f, 1}, 5126, "VEC2", 2);
+    u32 tangent = w.Data<float>({1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, -1}, 5126, "VEC4", 4);
+    String body = Format("\"meshes\":[{{\"primitives\":[{{\"attributes\":{{\"POSITION\":{},\"TEXCOORD_0\":{},\"TANGENT\":{}}},\"material\":0}}]}}],"
+                         "\"nodes\":[{{\"mesh\":0}}],\"textures\":[{{}}],\"materials\":[{{\"pbrMetallicRoughness\":{{\"baseColorTexture\":{{\"index\":0,"
+                         "\"extensions\":{{\"KHR_texture_transform\":{{\"offset\":[0.1,0.2],\"rotation\":0.3,\"scale\":[2,3]}}}}}}}}}}],"
+                         "\"extensionsUsed\":[\"KHR_texture_transform\"]",
+                         pos, uv, tangent);
+    Scene s;
+    HX_REQUIRE(Read(Span<const u8>(w.Glb(body)), s));
+    HX_CHECK(s.uvOriginTop);
+    Scene converted = s;
+    ConvertScene(converted);
+    HX_CHECK(!converted.uvOriginTop);
+    const float* a = s.Data(*s.Find(s.primitives[0], Semantic::TexCoord));
+    const float* b = converted.Data(*converted.Find(converted.primitives[0], Semantic::TexCoord));
+    bool flipped = true;
+    for (u32 v = 0; v < 3; v++)
+        flipped = flipped && b[v * 2] == a[v * 2] && b[v * 2 + 1] == 1 - a[v * 2 + 1];
+    HX_CHECK(flipped);
+    HX_CHECK(converted.Data(*converted.Find(converted.primitives[0], Semantic::Tangent))[11] == -s.Data(*s.Find(s.primitives[0], Semantic::Tangent))[11]);
+    // The same texel: F(T(p)) == T'(F(p)) with F(u, v) = (u, 1 - v).
+    auto apply = [](const TextureRef& t, float u, float v, float& x, float& y) {
+        float c = std::cos(t.rotation), sn = std::sin(t.rotation);
+        float su = u * t.scale[0], sv = v * t.scale[1];
+        x = c * su + sn * sv + t.offset[0];
+        y = -sn * su + c * sv + t.offset[1];
+    };
+    const TextureRef& before = s.materials[0].baseColorTexture;
+    const TextureRef& after = converted.materials[0].baseColorTexture;
+    bool same = true;
+    for (float u : {0.0f, 0.3f, 1.0f})
+        for (float v : {0.0f, 0.6f, 1.0f})
+        {
+            float x0, y0, x1, y1;
+            apply(before, u, v, x0, y0);
+            apply(after, u, 1 - v, x1, y1);
+            same = same && std::fabs(x1 - x0) < 1e-5f && std::fabs(y1 - (1 - y0)) < 1e-5f;
+        }
+    HX_CHECK(same);
+}
+
+// Extensions a file uses without requiring them, and the reader does not read, are named in the warnings.
+HX_TEST(Gltf, UnreadExtensionsAreWarnings)
+{
+    GltfWriter w;
+    u32 pos = w.Data<float>({0, 0, 0, 1, 0, 0, 0, 1, 0}, 5126, "VEC3", 3);
+    String body = Format("\"meshes\":[{{\"primitives\":[{{\"attributes\":{{\"POSITION\":{}}}}}]}}],\"nodes\":[{{\"mesh\":0}}],"
+                         "\"extensionsUsed\":[\"EXT_mesh_gpu_instancing\",\"KHR_materials_clearcoat\"]",
+                         pos);
+    Scene s;
+    HX_REQUIRE(Read(Span<const u8>(w.Glb(body)), s));
+    HX_REQUIRE(s.warnings.Size() == 1u);
+    HX_CHECK(s.warnings[0] == StringView("extensionsUsed: EXT_mesh_gpu_instancing is not read"));
 }
 
 HX_TEST(Gltf, DamagedFilesAreErrorsWithTheirPaths)

@@ -19,7 +19,8 @@ namespace helix::model
     // Turns a scene into the engine's frame: up, front and right of the source onto the engine's (a mirror for the right
     // handed sources of every format), and its units to meters. Positions, normals, tangents (and their handedness),
     // winding, node transforms, inverse bind matrices, morph deltas, animation keys and tangents, camera planes and
-    // light ranges all follow. Cameras and lights keep the direction they look in their source's convention (glTF -z,
-    // FBX +x). Converting a converted scene again only applies the scale factor.
+    // light ranges all follow. Texture coordinates of sources with v = 0 at the image's top (glTF) turn to the engine's
+    // v = 0 at the bottom, texture transforms with them. Cameras and lights keep the direction they look in their
+    // source's convention (glTF -z, FBX +x). Converting a converted scene again only applies the scale factor.
     void ConvertScene(Scene& scene, const ConvertOptions& options = {});
 }

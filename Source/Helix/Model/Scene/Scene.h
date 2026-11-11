@@ -300,6 +300,9 @@ namespace helix::model
         float unitScale = 1;
         // Frames per second of the source's animation, 0 when it has none.
         float frameRate = 0;
+        // Texture coordinate v = 0 at the top of the image (glTF) instead of its bottom (FBX, OBJ and the engine).
+        // Tangent handedness refers to v growing toward the image's top in every format.
+        bool uvOriginTop = false;
 
         Array<Node> nodes;
         Array<u32> roots;

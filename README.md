@@ -54,8 +54,9 @@ if (!ReadGltf(fileBytes, scene, error, options))
 - Nodes (TRS, or a matrix with its decomposition), the default scene, skins with inverse bind matrices, morph targets
   with target names and weights, animations (step, linear, cubic spline; translation, rotation, scale, weights),
   cameras and KHR_lights_punctual.
-- A file that requires an extension outside `SupportedGltfExtensions()` is refused, naming it. Every count, index,
-  offset and size is checked; a node with two parents or a cycle of parents is an error.
+- A file that requires an extension outside `SupportedGltfExtensions()` is refused, naming it; one it uses without
+  requiring it is read without it and named in `Scene::warnings`. Every count, index, offset and size is checked; a
+  node with two parents or a cycle of parents is an error.
 
 ## OBJ and MTL
 
@@ -71,7 +72,8 @@ options. A missing library is a warning, materials then keep only their names. E
 7.x files into `fbx::Document`, then the object graph and its connections into the scene:
 
 - Models become nodes. Their whole transform (translation, rotation in its rotation order, scaling, pre and post
-  rotation, rotation and scaling pivots and offsets) is reduced to translation, rotation and scale.
+  rotation, rotation and scaling pivots and offsets) is reduced to translation, rotation and scale. Models that use
+  one geometry with the same materials and no geometric transform share one mesh and skin.
 - Meshes come from the geometry with every layer element mapping (by polygon vertex, by vertex, by polygon, by edge,
   all same; direct or indexed): normals, tangents (handedness from the binormals), every UV set by name, colors, and
   one primitive per material of the model. Polygons become fans; the geometric transform is baked into the vertices.
@@ -97,7 +99,9 @@ ConvertScene(scene, options);
 The engine is y up with a model's front toward +z and its right toward -x as seen from the front (`kEngineAxes`).
 Sources are mapped by their up, front and right axes, so right handed sources (glTF, OBJ, Maya and Blender FBX) are
 mirrored. Positions, normals, tangents and their handedness, winding (triangles, strips, fans), node transforms, inverse
-bind matrices, morph deltas, animation keys, camera planes and light ranges follow; units become meters times the scale
+bind matrices, morph deltas, animation keys, camera planes and light ranges follow; glTF's texture coordinates (v = 0
+at the top of the image, `Scene::uvOriginTop`) and texture transforms turn to v = 0 at the bottom; units become meters
+times the scale
 factor.
 
 ## Mesh processing
@@ -120,7 +124,8 @@ Compact(scene);
 - Normals sum the face normals around each position within the smoothing angle (area and angle, area, angle or
   unweighted); vertices split where their corners differ, so seams of other streams keep one smooth normal.
 - Tangents follow MikkTSpace: per triangle derivatives along u signed by the UV orientation, projected into each
-  corner's normal plane and summed by angle over the corners of one vertex and orientation.
+  corner's normal plane and summed by angle over the corners of one vertex and orientation that are joined around it
+  by edges. On Blender's own MikkTSpace exports every corner agrees within 0.8 degrees, with the same sign.
 - The vertex cache order is Forsyth's linear speed algorithm; the overdraw order splits it into clusters and draws
   them outside in, within the given loss of cache efficiency. `AnalyzeVertexCache` (FIFO ACMR and ATVR) and
   `AnalyzeOverdraw` (a software rasterizer from six directions) measure both.

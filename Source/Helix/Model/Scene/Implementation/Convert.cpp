@@ -99,6 +99,36 @@ namespace helix::model
             }
         }
 
+        // Texture coordinates from v = 0 at the top of the image to v = 0 at its bottom: v becomes 1 - v (deltas -v).
+        void FlipV(Scene& s, Range streams, u32 vertices, bool deltas)
+        {
+            for (u32 i = 0; i < streams.count; i++)
+            {
+                VertexStream& st = s.streams[streams.begin + i];
+                if (st.semantic != Semantic::TexCoord || st.components < 2)
+                    continue;
+                float* d = s.floats.Data() + st.offset;
+                for (u32 v = 0; v < vertices; v++)
+                {
+                    float& y = d[usize(v) * st.components + 1];
+                    y = deltas ? -y : 1 - y;
+                }
+            }
+        }
+
+        // A texture transform (KHR_texture_transform: uv' = T R S uv, R = [cos sin; -sin cos]) for flipped v: with
+        // F(u, v) = (u, 1 - v), the new transform is F T R S F, which is the rotation negated and the offset
+        // (ox + sin(r) sy, 1 - oy - cos(r) sy).
+        void FlipV(TextureRef& t)
+        {
+            if (!t.Present())
+                return;
+            float c = std::cos(t.rotation), sn = std::sin(t.rotation);
+            float ox = t.offset[0] + sn * t.scale[1], oy = 1 - t.offset[1] - c * t.scale[1];
+            t.offset[0] = ox, t.offset[1] = oy;
+            t.rotation = -t.rotation;
+        }
+
         // Winding of a primitive reversed: triangles swap two corners, fans keep their hub, strips gain a corner.
         void Flip(Scene& s, Primitive& p)
         {
@@ -221,6 +251,24 @@ namespace helix::model
         }
         for (Light& l : s.lights)
             l.range *= u;
+        if (s.uvOriginTop)
+        {
+            for (const Primitive& p : s.primitives)
+            {
+                FlipV(s, p.streams, p.vertexCount, false);
+                for (u32 t = 0; t < p.targets.count; t++)
+                    FlipV(s, s.morphTargets[p.targets.begin + t].streams, p.vertexCount, true);
+            }
+            for (Material& mat : s.materials)
+                for (TextureRef* t :
+                     {&mat.baseColorTexture, &mat.metallicRoughnessTexture, &mat.normalTexture, &mat.occlusionTexture, &mat.emissiveTexture,
+                      &mat.transmissionTexture, &mat.thicknessTexture, &mat.clearcoatTexture, &mat.clearcoatRoughnessTexture, &mat.clearcoatNormalTexture,
+                      &mat.sheenColorTexture, &mat.sheenRoughnessTexture, &mat.specularTexture, &mat.specularColorTexture, &mat.iridescenceTexture,
+                      &mat.iridescenceThicknessTexture, &mat.anisotropyTexture, &mat.roughnessTexture, &mat.metallicTexture, &mat.alphaTexture,
+                      &mat.bumpTexture, &mat.displacementTexture, &mat.specularColorClassicTexture, &mat.shininessTexture})
+                    FlipV(*t);
+            s.uvOriginTop = false;
+        }
         s.axes = kEngineAxes;
         if (options.convertUnits && s.unitScale > 0)
             s.unitScale = 1;

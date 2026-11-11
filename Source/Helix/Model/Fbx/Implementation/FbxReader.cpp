@@ -621,9 +621,19 @@ namespace helix::model
                 return i < l.values.Size() / l.components ? u32(i) : kNone;
             }
 
+            // A geometry several models use with the same materials and no geometric transform becomes one mesh (and
+            // skin) they share, as instances do.
+            struct SharedMesh
+            {
+                i64 geometry;
+                Array<u32> materials;
+                u32 mesh, skin;
+            };
+
             bool Meshes()
             {
                 Array<const Object*> geometries, materials;
+                Array<SharedMesh> shared;
                 for (const Object& model : objects_)
                 {
                     const u32* node = modelNode_.Find(model.id);
@@ -637,11 +647,26 @@ namespace helix::model
                     for (const Object* m : materials)
                         list.Push(*materialIndex_.Find(m->id));
                     const Xform& x = xforms_[*node];
+                    bool plain = x.gt[0] == 0 && x.gt[1] == 0 && x.gt[2] == 0 && x.gr[0] == 0 && x.gr[1] == 0 && x.gr[2] == 0 && x.gs[0] == 1 && x.gs[1] == 1 &&
+                                 x.gs[2] == 1;
+                    const SharedMesh* known = nullptr;
+                    for (const SharedMesh& m : shared)
+                        if (plain && m.geometry == geometries[0]->id && m.materials.Size() == list.Size() &&
+                            (list.Empty() || std::memcmp(m.materials.Data(), list.Data(), list.Size() * sizeof(u32)) == 0))
+                            known = &m;
+                    if (known)
+                    {
+                        s_.nodes[*node].mesh = known->mesh;
+                        s_.nodes[*node].skin = known->skin;
+                        continue;
+                    }
                     Mat4 geometric = Mat4::Translation(x.gt[0], x.gt[1], x.gt[2]) * Euler(x.gr, 0) * Mat4::Scale(x.gs[0], x.gs[1], x.gs[2]);
                     u32 mesh;
                     if (!Mesh(*geometries[0], model, list, geometric, mesh))
                         return false;
                     s_.nodes[*node].mesh = mesh;
+                    if (plain)
+                        shared.Push({geometries[0]->id, list, mesh, s_.nodes[*node].skin});
                 }
                 return true;
             }
