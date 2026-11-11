@@ -1,8 +1,8 @@
 # Helix.Model
 
 Model reading of the Helix engine: glTF 2.0 and GLB, FBX (binary and ASCII), Wavefront OBJ and MTL, read into one in
-memory scene that the model importer turns into meshes, materials, skeletons and clips, and the conversion of that scene
-to the engine's axes and units. All code is own; JSON comes from Helix.Serialization, inflate from Helix.Image.
+memory scene that the model importer turns into meshes, materials, skeletons and clips, the conversion of that scene
+to the engine's axes and units, and the mesh processing the importer runs on it. All code is own; JSON comes from Helix.Serialization, inflate from Helix.Image.
 
 ## Contents
 
@@ -14,8 +14,10 @@ to the engine's axes and units. All code is own; JSON comes from Helix.Serializa
 | `Source/Helix/Model/Fbx/Fbx.h` | `ReadFbx`, `IsBinaryFbx` |
 | `Source/Helix/Model/Fbx/Document.h` | `fbx::Document`: the node tree of a binary or ASCII FBX file |
 | `Source/Helix/Model/Scene/Convert.h` | `ConvertScene`, `ConvertOptions`, `kEngineAxes` |
+| `Source/Helix/Model/Mesh/Mesh.h` | Welding, normals, tangents, cache / overdraw / fetch optimization, simplification, meshlets, blend shape deltas |
 | `Tests/Support/GltfWriter.h` | Builds glTF and GLB files for the tests: binary data, buffer views, accessors, the JSON |
 | `Tests/Support/FbxWriter.h` | Builds FBX files for the tests: a node tree as binary 7400 / 7500 (raw or zlib arrays) or ASCII |
+| `Tests/Support/SampleMeshes.h` | Generated grids, UV spheres (with their seams) and cubes for the mesh processing |
 | `Tests/`, `Benchmarks/`, `Fuzz/` | Every accessor form, extension and OBJ statement, errors with their paths and lines; a large grid |
 
 ## The scene
@@ -98,10 +100,49 @@ mirrored. Positions, normals, tangents and their handedness, winding (triangles,
 bind matrices, morph deltas, animation keys, camera planes and light ranges follow; units become meters times the scale
 factor.
 
+## Mesh processing
+
+Every function works on a primitive of the scene and keeps all its streams and morph targets in step; new stream data
+is appended to `Scene::floats` and `Compact` drops what nothing uses any more.
+
+```cpp
+WeldVertices(scene, p);                        // vertices equal in every stream merged
+CalculateNormals(scene, p, 60);                // smoothing angle, area and angle weighted
+CalculateTangents(scene, p);                   // MikkTSpace, bitangent sign in w
+OptimizeVertexCache(scene, p);                 // or OptimizeOverdraw(scene, p, 1.05f)
+OptimizeVertexFetch(scene, p);
+Simplify(scene, p, 0.25f, 0.01f);              // a quarter of the triangles, at most 1 % of the size away
+Compact(scene);
+```
+
+- Strips and fans become lists; triangles that use indices outside the vertices are dropped by the functions that
+  need triangles.
+- Normals sum the face normals around each position within the smoothing angle (area and angle, area, angle or
+  unweighted); vertices split where their corners differ, so seams of other streams keep one smooth normal.
+- Tangents follow MikkTSpace: per triangle derivatives along u signed by the UV orientation, projected into each
+  corner's normal plane and summed by angle over the corners of one vertex and orientation.
+- The vertex cache order is Forsyth's linear speed algorithm; the overdraw order splits it into clusters and draws
+  them outside in, within the given loss of cache efficiency. `AnalyzeVertexCache` (FIFO ACMR and ATVR) and
+  `AnalyzeOverdraw` (a software rasterizer from six directions) measure both.
+- Simplification collapses edges by quadric error onto existing vertices: borders only along themselves, vertices on
+  attribute seams and non-manifold edges stay, collapses that would turn a triangle are refused. `SimplifyIndices`
+  works on plain arrays for LODs.
+- `BuildMeshlets` grows meshlets of up to 64 vertices and 124 triangles along shared vertices, with bounding spheres
+  and normal cones.
+- `CompressDeltas` keeps the vertices a blend shape moves, 16 bits a component with one scale, within half a step.
+
+On a scrambled grid the cache order brings a 16 entry FIFO from 3.0 to 0.68 vertices per triangle; the overdraw
+order of four overlapping spheres shades 1.09 pixels per covered pixel against 1.24 for the cache order alone. A UV
+sphere of 11904 indices reaches a quarter at 0.4 % of its size.
+
 ## Speed
 
 Release, one thread, a grid of 131072 triangles with positions, normals and texture coordinates: GLB in about 6 ms
 (45 ns a triangle), OBJ (7 MB of text) in about 70 ms, FBX 7500 with zlib arrays in about 85 ms.
+
+Mesh processing of a UV sphere of 130560 triangles: welding about 8 ms, normals and tangents about 40 to 60 ms each,
+vertex cache order about 90 ms, overdraw order about 100 ms, fetch order about 10 ms, simplification to a tenth about
+140 ms, meshlets about 50 ms.
 
 ## Building
 
